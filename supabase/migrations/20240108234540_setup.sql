@@ -1,81 +1,60 @@
--- Enable HTTP extension
-create extension http with schema extensions;
+-- Enable required extensions
+create extension if not exists "uuid-ossp";
 
--- Enable vector extension
-create extension vector with schema extensions;
+-- Users table
+create table if not exists users (
+  id uuid primary key default uuid_generate_v4(),
+  email text unique,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
--- Function to update modified column
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now(); 
-    RETURN NEW; 
-END;
-$$ language 'plpgsql';
+-- Chats table
+create table if not exists chats (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references users(id) on delete cascade,
+  title text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
--- Function to delete a message and all following messages
-CREATE OR REPLACE FUNCTION delete_message_including_and_after(
-    p_user_id UUID, 
-    p_chat_id UUID, 
-    p_sequence_number INT
-)
-RETURNS VOID AS $$
-BEGIN
-    DELETE FROM messages 
-    WHERE user_id = p_user_id AND chat_id = p_chat_id AND sequence_number >= p_sequence_number;
-END;
-$$ LANGUAGE plpgsql;
+-- Messages table
+create table if not exists messages (
+  id uuid primary key default uuid_generate_v4(),
+  chat_id uuid references chats(id) on delete cascade,
+  role text check (role in ('user', 'assistant')),
+  content text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
--- Function to create duplicate messages for a new chat
-CREATE OR REPLACE FUNCTION create_duplicate_messages_for_new_chat(old_chat_id UUID, new_chat_id UUID, new_user_id UUID)
-RETURNS VOID AS $$
-BEGIN
-    INSERT INTO messages (user_id, chat_id, content, role, model, sequence_number, tokens, created_at, updated_at)
-    SELECT new_user_id, new_chat_id, content, role, model, sequence_number, tokens, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-    FROM messages
-    WHERE chat_id = old_chat_id;
-END;
-$$ LANGUAGE plpgsql;
+-- Optional: Config table
+create table if not exists config (
+  key text primary key,
+  value text
+);
 
--- Policy to allow users to read their own files
-CREATE POLICY "Allow users to read their own files"
-ON storage.objects FOR SELECT
-TO authenticated
-USING (auth.uid()::text = owner_id::text);
+-- Insert your Supabase credentials (optional, only if app reads from DB)
+insert into config (key, value) values 
+  ('SUPABASE_URL', 'https://wctcguchnpahsuthwfxx.supabase.co'),
+  ('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjdGNndWNobnBhaHN1dGh3Znh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0OTA0MzksImV4cCI6MjA3MDA2NjQzOX0.58uyT9RGZnKqZEnPuY_89JUM5Z41yGyU1otwUc0NheM'),
+  ('SUPABASE_SERVICE_ROLE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjdGNndWNobnBhaHN1dGh3Znh4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NDQ5MDQzOSwiZXhwIjoyMDcwMDY2NDM5fQ.sI7bf3LuPgK8_W-ySvubadezkCaIVaQISgCM_grsWcw');
 
--- Function to delete a storage object
-CREATE OR REPLACE FUNCTION delete_storage_object(bucket TEXT, object TEXT, OUT status INT, OUT content TEXT)
-RETURNS RECORD
-LANGUAGE 'plpgsql'
-SECURITY DEFINER
-AS $$
-DECLARE
-  project_url TEXT := 'http://supabase_kong_chatbotui:8000';
-  service_role_key TEXT := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU'; -- full access needed for http request to storage
-  url TEXT := project_url || '/storage/v1/object/' || bucket || '/' || object;
-BEGIN
-  SELECT
-      INTO status, content
-           result.status::INT, result.content::TEXT
-      FROM extensions.http((
-    'DELETE',
-    url,
-    ARRAY[extensions.http_header('authorization','Bearer ' || service_role_key)],
-    NULL,
-    NULL)::extensions.http_request) AS result;
-END;
-$$;
+-- Enable Row-Level Security
+alter table users enable row level security;
+alter table chats enable row level security;
+alter table messages enable row level security;
 
--- Function to delete a storage object from a bucket
-CREATE OR REPLACE FUNCTION delete_storage_object_from_bucket(bucket_name TEXT, object_path TEXT, OUT status INT, OUT content TEXT)
-RETURNS RECORD
-LANGUAGE 'plpgsql'
-SECURITY DEFINER
-AS $$
-BEGIN
-  SELECT
-      INTO status, content
-           result.status, result.content
-      FROM public.delete_storage_object(bucket_name, object_path) AS result;
-END;
-$$;
+-- RLS Policies
+create policy "Allow user access to their data" on users
+  for select using (true);
+
+create policy "Allow insert for authenticated users" on users
+  for insert with check (true);
+
+create policy "Allow user access to their own chats" on chats
+  for all using (auth.uid() = user_id);
+
+create policy "Allow user access to their own messages" on messages
+  for all using (
+    chat_id in (
+      select id from chats where user_id = auth.uid()
+    )
+  );
