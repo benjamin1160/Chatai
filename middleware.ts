@@ -1,46 +1,22 @@
-import { createClient } from "@/lib/supabase/middleware"
-import { i18nRouter } from "next-i18n-router"
-import { NextResponse, type NextRequest } from "next/server"
-import i18nConfig from "./i18nConfig"
+import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(request: NextRequest) {
-  const i18nResult = i18nRouter(request, i18nConfig)
-  if (i18nResult) return i18nResult
+export async function middleware(req: Request) {
+  const res = NextResponse.next();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { get: () => null, set: () => {}, remove: () => {} } }
+  );
 
-  try {
-    const { supabase, response } = createClient(request)
+  const { data: { user } } = await supabase.auth.getUser();
+  const url = new URL(req.url);
+  const publicPaths = ["/login", "/auth/callback", "/auth/confirm"];
 
-    const session = await supabase.auth.getSession()
-
-    const redirectToChat = session && request.nextUrl.pathname === "/"
-
-    if (redirectToChat) {
-      const { data: homeWorkspace, error } = await supabase
-        .from("workspaces")
-        .select("*")
-        .eq("user_id", session.data.session?.user.id)
-        .eq("is_home", true)
-        .single()
-
-      if (!homeWorkspace) {
-        throw new Error(error?.message)
-      }
-
-      return NextResponse.redirect(
-        new URL(`/${homeWorkspace.id}/chat`, request.url)
-      )
-    }
-
-    return response
-  } catch (e) {
-    return NextResponse.next({
-      request: {
-        headers: request.headers
-      }
-    })
-  }
+  if (!user && !publicPaths.includes(url.pathname))
+    return NextResponse.redirect(new URL("/login", req.url));
+  if (user && url.pathname === "/login")
+    return NextResponse.redirect(new URL("/chat", req.url));
+  return res;
 }
-
-export const config = {
-  matcher: "/((?!api|static|.*\\..*|_next|auth).*)"
-}
+export const config = { matcher: ["/((?!_next|.*\\.(?:png|jpg|svg|css|js|ico)).*)"] };
