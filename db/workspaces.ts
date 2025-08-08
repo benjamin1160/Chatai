@@ -7,10 +7,39 @@ export const getHomeWorkspaceByUserId = async (userId: string) => {
     .select("*")
     .eq("user_id", userId)
     .eq("is_home", true)
-    .single()
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
 
   if (!homeWorkspace) {
-    throw new Error(error.message)
+    const defaultWorkspace: TablesInsert<"workspaces"> = {
+      user_id: userId,
+      name: "Default Workspace",
+      description: "My home workspace.",
+      default_context_length: 4096,
+      default_model: "gpt-4-turbo-preview",
+      default_prompt: "You are a friendly, helpful AI assistant.",
+      default_temperature: 0.5,
+      embeddings_provider: "openai",
+      include_profile_context: true,
+      include_workspace_instructions: true,
+      instructions: "",
+      is_home: true,
+    }
+
+    const { data: newWorkspace, error: createError } = await supabase
+      .from("workspaces")
+      .insert(defaultWorkspace)
+      .select("*")
+      .single()
+
+    if (createError) {
+      throw new Error(createError.message)
+    }
+
+    return newWorkspace.id
   }
 
   return homeWorkspace.id
