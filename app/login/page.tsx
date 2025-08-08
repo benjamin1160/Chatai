@@ -1,12 +1,28 @@
-"use client";
-import { createClient } from "@supabase/supabase-js";
-const s = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+"use client"
+import { FormEvent } from "react"
+import { createClient } from "@supabase/supabase-js"
+
 export default function Page() {
-  async function signin(e:any){ e.preventDefault();
-    const email = new FormData(e.currentTarget).get("email") as string;
-    await s.auth.signInWithOtp({ email }); alert("Magic link sent."); }
-  return (<form onSubmit={signin} className="max-w-sm mx-auto p-6">
-    <input name="email" type="email" placeholder="you@email.com" className="border p-2 w-full mb-2" />
-    <button className="border px-3 py-2 w-full">Send magic link</button>
-  </form>);
+  async function signIn(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const email = new FormData(e.currentTarget).get("email") as string
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    await supabase.auth.signInWithOtp({ email })
+    alert("Magic link sent.")
+  }
+
+  return (
+    <form onSubmit={signIn} className="mx-auto max-w-sm p-6">
+      <input
+        name="email"
+        type="email"
+        placeholder="you@email.com"
+        className="mb-2 w-full border p-2"
+      />
+      <button className="w-full border px-3 py-2">Send magic link</button>
+    </form>
+  )
 }
