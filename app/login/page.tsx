@@ -10,7 +10,10 @@ export default function Page() {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
-    await supabase.auth.signInWithOtp({ email })
+    await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/auth/confirm` }
+    })
     alert("Magic link sent.")
   }
 
